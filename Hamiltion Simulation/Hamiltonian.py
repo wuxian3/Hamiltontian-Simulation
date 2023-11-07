@@ -35,7 +35,7 @@ def random_generate_Hamiltonian(qubit_number, pauli_string_number):
 
         for k in range(k_local):
             p_str = ''
-            p = random.randint(0, 1)
+            p = random.randint(0, 2)
             p_str += pauli_group[p]
             p_str += str(random_index[k])
             pauli.append(p_str)

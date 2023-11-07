@@ -11,10 +11,10 @@ import scipy
 import cmath
 
 # 一些重要的全局变量
-qb_num = 5  # qubit的数量
+qb_num = 2  # qubit的数量
 
-r = 30  # trotter的步数
-t = 1.0 # 哈密顿量的演化时间
+r = 10  # trotter的步数
+t = 1.0  # 哈密顿量的演化时间
 
 
 def qubit_map_init(n):
@@ -58,7 +58,7 @@ def random_rho():
 
 def trace_Or(sum_h, obv, input_rho):
     # rstate = pq.state.random_state(qb_num)
-    tr_list= []
+    tr_list = []
     # tem_state = rstate.clone()
     for i in range(sum_h.n_terms):
         para = sum_h.coefficients[i]
@@ -87,10 +87,15 @@ def tr_hamiltonian_cmp(x, y):
     return 0
 
 
+def my_gate_fidelity(a, b):
+    dis = a - b
+    return paddle.trace(dis.conj().T @ dis)
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")  # 隐藏 warnings
-    np.set_printoptions(suppress=True, linewidth = np.nan)  # 启用完整显示，便于在终端 print 观察矩阵时不引入换行符
+    np.set_printoptions(suppress=True, linewidth=np.nan)  # 启用完整显示，便于在终端 print 观察矩阵时不引入换行符
 
     # 读取一个测量算子
     obv = input_obv()
@@ -110,15 +115,17 @@ if __name__ == '__main__':
     random.shuffle(H_permutation)
     H_permutation = np.array(H_permutation)
 
-    pq.trotter.construct_trotter_circuit(circuit=H_cir, hamiltonian=H, tau=t/r, steps=r)
+    pq.trotter.construct_trotter_circuit(circuit=H_cir, hamiltonian=H, tau=t / r, steps=r)
+    print(H_cir)
 
-    origin = scipy.linalg.expm(1j * t * H.construct_h_matrix(qubit_num=qb_num))  # 计算目标哈密顿量的原始电路
+    construct_h = H.construct_h_matrix(qb_num)
+    origin = scipy.linalg.expm(-1j * t * construct_h)  # 计算目标哈密顿量的原始电路
     H_matrix = H_cir.unitary_matrix()
     H_matrix = H_matrix.numpy()
-    # print(f'模拟电路矩阵为: \n {H_matrix} \n原始电路矩阵为: \n {origin}')
+    print(f'模拟电路矩阵为: \n {H_matrix} \n原始电路矩阵为: \n {origin}')
 
-    # fid = pq.qinfo.gate_fidelity(pq.linalg.dagger(H_matrix), origin)
-    # print(f'门保真度为: {fid:.9f}')
+    fid = pq.qinfo.gate_fidelity(H_matrix, origin)
+    print(f'门保真度为: {fid:.9f}')
 
     tr_list = trace_Or(H, obv, rho)
     tr_list.sort(key=functools.cmp_to_key(tr_hamiltonian_cmp), reverse=True)
