@@ -9,88 +9,31 @@ import paddle_quantum as pq
 import paddle
 import torch
 from paddle_quantum.trotter import construct_trotter_circuit, get_1d_heisenberg_hamiltonian
+import Hamiltonian
+import mapping
+import sample
 
-qubits = 6  # 设置量子比特数
-pauli_str_num = 100     # pauli串数量
+qubits = 5   # 设置量子比特数
+pauli_str_num = 50   # pauli串数量
 warnings.filterwarnings("ignore")   # 隐藏 warnings
 np.set_printoptions(suppress=True, linewidth=np.nan)        # 启用完整显示，便于在终端 print 观察矩阵时不引入换行符
 pq.set_backend('density_matrix')    # 使用密度矩阵表示
 pauli_group = ['X', 'Z', 'Y', 'I']
 accuracy = 0.1
+swap_accuracy = 0.01 / pauli_str_num
 t = 1
 print_flag = False
+global_local = qubits
+extra_gate_number = 10
 
-
-def random_generate_Hamiltonian(qubit_number: int, pauli_string_number: int) -> object:
-    Hamiltonian_list = []
-    for i in range(pauli_string_number):
-        k_local = random.randint(1, qubits)
-        pauli = []
-        random_index = random.sample(range(0, qubit_number), k_local)
-        random_index.sort()
-        p_str = ''
-        for k in range(k_local):
-            p = random.randint(0, 2)
-            p_str += pauli_group[p]
-            p_str += str(random_index[k])
-            p_str += ','
-        para = random.random()
-        para = np.random.choice([0.01, 0.2, 0.95], p=[0.79, 0.2, 0.01])
-        H = (para, p_str.strip(','))
-
-        Hamiltonian_list.append(H)
-    return Hamiltonian_list
-
-
-def generate_matrix_from_sample(sample_list, H):
-    h_j = abs(np.array(H.coefficients))  # 获取系数
-    lamda = h_j.sum()
-    gate_counts = len(sample_list)
-    tau = 1j * lamda * t / gate_counts
-    simulation = np.identity(2 ** qubits)  # 生成单位矩阵
-    for i in sample_list:
-        p_term = H.terms[i-1]
-        p_str = ''
-        for p in p_term:
-            p_str += p + ','
-        p_str = p_str.strip(',')
-        pauli_str_j = (1.0, p_str)  # 获取H_j，注意，应抛弃其原有系数
-        H_i = pq.hamiltonian.Hamiltonian([pauli_str_j]).construct_h_matrix(qubit_num=qubits)
-        simulation = np.matmul(scipy.linalg.expm(tau * H_i), simulation)
-    return simulation
-
-
-def output_simulation_error(sample_list, true_random_order, new_sample_list, throw_sample_list, H) -> None:
-    origin = scipy.linalg.expm(1j * t * H.construct_h_matrix(qubit_num=qubits))  # 计算目标哈密顿量的原始电路
-    qdrift_simulation = generate_matrix_from_sample(sample_list, H)
-    true_random_simulation = generate_matrix_from_sample(true_random_order, H)
-    part_random_simulation = generate_matrix_from_sample(new_sample_list, H)
-    throw_simulation = generate_matrix_from_sample(throw_sample_list, H)
-
-    distance = 0.5 * np.linalg.norm(origin - qdrift_simulation, ord=2)
-
-    random_distance = 0.5 * np.linalg.norm(origin - true_random_simulation, ord=2)
-    new_distance = 0.5 * np.linalg.norm(origin - part_random_simulation, ord=2)
-
-    throw_distance = 0.5 * np.linalg.norm(origin - throw_simulation, ord=2)
-
-    # simulate_qdrift_distance = 0.5 * np.linalg.norm(qdrift_simulation - throw_simulation, ord=2)
-    if print_flag:
-        print(f'模拟误差为: {distance:.4f}')
-        print(f'完全随机打乱顺序的模拟误差为: {random_distance:.4f}')
-
-        print(f'部分随机打乱顺序的模拟误差为: {new_distance:.4f}')
-
-        print(f'丢弃部分小概率采样的模拟误差为: {throw_distance:.4f}')
-        print(f'丢弃部分小概率采样后与qdrift的模拟误差为: {simulate_qdrift_distance:.4f}')
-    return [distance, random_distance, new_distance, throw_distance]
+topology = torch.zeros(size=[qubits, qubits])
 
 
 def output_simulation_gate_cost(sample_list, true_random_order, new_sample_list, throw_sample_list, H):
-    qdrift_cost = get_gate_cost(sample_list, H)
-    true_random_cost = get_gate_cost(true_random_order, H)
-    part_random_cost = get_gate_cost(new_sample_list, H)
-    throw_cost = get_gate_cost(throw_sample_list, H)
+    qdrift_cost = sample.get_gate_cost(sample_list, H)
+    true_random_cost = sample.get_gate_cost(true_random_order, H)
+    part_random_cost = sample.get_gate_cost(new_sample_list, H)
+    throw_cost = sample.get_gate_cost(throw_sample_list, H)
     if print_flag:
         print(f'qdrift门开销为: {qdrift_cost}')
         print(f'完全随机qdrift门开销为: {true_random_cost}')
@@ -100,56 +43,73 @@ def output_simulation_gate_cost(sample_list, true_random_order, new_sample_list,
     return [qdrift_cost, true_random_cost, part_random_cost, throw_cost]
 
 
-def get_gate_cost(sample_list, H):
+def get_qasm_from_sample(sample_list, H):
+    qasm = f'''OPENQASM 2.0;\ninclude "qelib1.inc";\nqreg q[{qubits}];\ncreg c[{qubits}];\n'''
+
+    h_j = abs(np.array(H.coefficients))  # 获取系数
+    lamda = h_j.sum()
+    p_j = h_j / lamda  # 计算离散概率分布
+
     h_pauli_words = H.pauli_words
-    gate_cost = 0
     last_pauli_word = ''
     for _ in range(qubits):
         last_pauli_word += 'I'
-    for i in sample_list:
-        sample_pauli_word = h_pauli_words[i - 1]
-        # 如果和上一个完全一致，那可以直接合并成一个
-        if last_pauli_word == sample_pauli_word:
-            continue
-        # 用于记录相邻的pauli word的相似程度，并根据相似程度适当减少门的开销
-        pauli_word_match_number = 0
-        local_num = 0
-        for j in range(qubits):
-            if sample_pauli_word[j] == 'I':
-                continue
-            elif sample_pauli_word[j] == 'Z':
-                local_num += 1
-                if last_pauli_word[j] == 'Z':
-                    pauli_word_match_number += 1
-            else:
-                local_num += 1
-                gate_cost += 2
-                if last_pauli_word[j] == sample_pauli_word[j]:
-                    pauli_word_match_number += 1
-                    gate_cost -= 2
-        gate_cost += 2 * (local_num - 1) + 1
-        # 根据匹配数减少CNOT门的数量 (需要考虑匹配，暂时不能直接使用)
-        # gate_cost -= 2 * (pauli_word_match_number - 1)
+    for i in range(len(sample_list)):
+        si = sample_list[i]
+        min_cost = sample.get_a_score(last_pauli_word, h_pauli_words[si - 1])
+        min_index = i
 
-        last_pauli_word = sample_pauli_word
-    return gate_cost
+        # 在概率相差不大的采样里挑一个开销最小的
+        for j in range(i + 1, len(sample_list)):
+            sj = sample_list[j]
+            if abs(p_j[si - 1] - p_j[sj - 1]) > swap_accuracy:
+                continue
+            sj_cost = sample.get_a_score(last_pauli_word, h_pauli_words[sj - 1])
+            if sj_cost < min_cost:
+                min_cost = sj_cost
+                min_index = j
+
+        # 交换开销最小的采样与当前的采样
+        tem = sample_list[i]
+        sample_list[i] = sample_list[min_index]
+        sample_list[min_index] = tem
+        last_pauli_word = h_pauli_words[sample_list[i] - 1]
+
+        si = sample_list[i]
+        local_index = []
+        gate_his = []
+        pauli_word = h_pauli_words[si - 1]
+        # 预处理，对X加hadamard，对Y加旋转门
+        for j in range(qubits):
+            if pauli_word[j] != 'I':
+                local_index.append(j)
+                if pauli_word[j] == 'X':
+                    q_str = f'h q[{j}];\n'
+                    qasm += q_str
+                    gate_his.append(q_str)
+                elif pauli_word[j] == 'Y':
+                    q_str = f'rx({math.pi/-2}) q[{j}];\n'
+                    qasm += f'rx({math.pi/2}) q[{j}];\n'
+                    gate_his.append(q_str)
+
+        for j in range(1, len(local_index)):
+            gate_str = f'cx q[{local_index[j - 1]}],q[{local_index[j]}];\n'
+            qasm += gate_str
+            gate_his.append(gate_str)
+
+        qasm += f'rz({h_j[si - 1]}) q[{local_index[-1]}];\n'
+
+        while len(gate_his):
+            gate_str = gate_his.pop(-1)
+            qasm += gate_str
+
+    return qasm
 
 
 def one_time_test():
     sparse_num = int(pauli_str_num / qubits ** 2) + 1
-    H_j = random_generate_Hamiltonian(qubits, pauli_str_num)
-    # H_j = pq.qinfo.random_hamiltonian_generator(qubits, pauli_str_num)
-    # H_j = pq.qinfo.random_pauli_str_generator(qubits, pauli_str_num)
-    # print(H_j)
+    H_j = Hamiltonian.random_generate_Hamiltonian(qubits, pauli_str_num, global_local, custom=1)
 
-    # 将一部分的h_j缩小
-    # index = list(range(pauli_str_num))
-    # random.shuffle(index)
-    # for i in range(sparse_num, pauli_str_num):
-    #     tup = H_j[index[i]]
-    #     H_j[index[i]] = (tup[0] / (qubits ** 2 + pauli_str_num), tup[1])
-
-    # print(H_j)
     H = pq.hamiltonian.Hamiltonian(H_j)
     # H = H_j
 
@@ -157,7 +117,7 @@ def one_time_test():
     lamda = h_j.sum()
 
     p_j = h_j/lamda  # 计算离散概率分布
-    gate_counts = math.ceil(2 * lamda**2 * t**2 / accuracy)
+    gate_counts = math.ceil(2 * lamda**2 * t**2 / accuracy) + extra_gate_number
 
     accept_error = 1 / (len(p_j))
 
@@ -207,28 +167,61 @@ def one_time_test():
         if p_j[i - 1] >= accept_error:
             throw_sample_list.append(i)
 
-    # print(len(sample_list), len(throw_sample_list))
-    if print_flag:
-        print(f'采样结果为:\n {sample_list}')
-        print(f'完全随机打乱采样结果为:\n {true_random_order}')
-        print(f'部分随机打乱采样结果为:\n {new_sample_list}')
-        print(f'丢弃部分小概率采样结果为:\n {throw_sample_list}')
-
     ret_list = []
     _cost_list = output_simulation_gate_cost(sample_list, true_random_order, new_sample_list, throw_sample_list, H)
     ret_list.append(_cost_list)
 
-    _dis_tensor = output_simulation_error(sample_list, true_random_order, new_sample_list, throw_sample_list, H)
+    # _dis_tensor = output_simulation_error(sample_list, true_random_order, new_sample_list, throw_sample_list, H)
+    _dis_tensor = [sample.get_simulation_error(sample_list, H),
+                   sample.get_simulation_error(true_random_order, H),
+                   sample.get_simulation_error(new_sample_list, H),
+                   sample.get_simulation_error(throw_sample_list, H)]
     ret_list.append(_dis_tensor)
+
+    _cost_list_b = [sample.get_simulation_gate_cost_b_2nd_order(sample_list, H, swap_accuracy),
+                    sample.get_simulation_gate_cost_b_2nd_order(true_random_order, H, swap_accuracy),
+                    sample.get_simulation_gate_cost_b_2nd_order(new_sample_list, H, swap_accuracy),
+                    sample.get_simulation_gate_cost_b_2nd_order(throw_sample_list, H, swap_accuracy)]
+    ret_list.append(_cost_list_b)
+
+    _dis_tensor = [sample.get_simulation_error_2nd_order(sample_list, H),
+                   sample.get_simulation_error_2nd_order(true_random_order, H),
+                   sample.get_simulation_error_2nd_order(new_sample_list, H),
+                   sample.get_simulation_error_2nd_order(throw_sample_list, H)]
+    ret_list.append(_dis_tensor)
+
+    # print(get_qasm_from_sample(sample_list, H))
 
     return ret_list
 
-repeat_times = 100
+#
+# initial_map = {}
+# for i in range(qubits):
+#     initial_map[i] = i
+# topology = torch.tensor([[0, 1, 0, 1],
+#                          [1, 0, 0, 0],
+#                          [0, 0, 0, 1],
+#                          [1, 0, 1, 0]])
+# a_map = mapping.mapper(topology, initial_map)
+
+
+repeat_times = 1
 cost_tensor = torch.zeros(size=[4])
 dis_tensor = torch.zeros(size=[4])
+
+cost_tensor_b = torch.zeros(size=[4])
+dis_tensor_b = torch.zeros(size=[4])
 for _ in range(repeat_times):
     ret = one_time_test()
     cost_tensor += torch.tensor(ret[0])
     dis_tensor += torch.tensor(ret[1])
-print(cost_tensor / repeat_times)
-print(dis_tensor / repeat_times)
+
+    cost_tensor_b += torch.tensor(ret[2])
+    dis_tensor_b += torch.tensor(ret[3])
+
+print(f"门的平均开销为{cost_tensor / repeat_times}")
+print(f"平均模拟误差为{dis_tensor / repeat_times}")
+
+print("下面是小误差概率交换的结果")
+print(f"门的平均开销为{cost_tensor_b / repeat_times}")
+print(f"平均模拟误差为{dis_tensor_b / repeat_times}")

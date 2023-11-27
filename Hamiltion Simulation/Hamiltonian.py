@@ -1,60 +1,37 @@
 import math
 import random
 # import paddle_quantum as pq
+import numpy as np
 
-pauli_group=['X', 'Z', 'Y']
-pi = math.pi
-class Hamiltonian:
-    def __init__(self, para, pauli):
-        self.para = float(para)
-        self.pauli = []
-        self.index = []
-        self.size = len(pauli)
-        for i in range(len(pauli)):
-            self.pauli.append(pauli[i][0])
-            self.index.append(int(pauli[i][1:]))
+pauli_group = ['X', 'Z', 'Y', 'I']
 
-    def __str__(self):
-        ret_str = str(self.para) + ' '
-        for i in range(self.size):
-            ret_str += self.pauli[i] + str(self.index[i]) + ','
 
-        return ret_str.strip(',')
-
-    # Such a Hamiltonian is
-    # for i in range(len(self.para)):
-    #   H = self.para[i] * self.pauli[i]
-
-def random_generate_Hamiltonian(qubit_number, pauli_string_number):
+def random_generate_Hamiltonian(qubit_number: int, pauli_string_number: int, max_local: int, custom: int = 0) -> object:
+    r"""
+    根据给定参数生成一组哈密顿量串，可以直接调用pq.Hamiltonian将该串转为pq.Hamiltonian
+    :param qubit_number: 比特数量
+    :param pauli_string_number: 泡利串数量
+    :param max_local: 最大允许的local数
+    :param custom: 默认0，表示完全随机，若为1，则可手动定义参数出现的概率（未实现，将来吧反正
+    :return: 哈密顿量表示串
+    """
     Hamiltonian_list = []
     for i in range(pauli_string_number):
-        k_local = random.randint(1, 4)
+        k_local = random.randint(1, max_local)
         pauli = []
-
         random_index = random.sample(range(0, qubit_number), k_local)
-
+        random_index.sort()
+        p_str = ''
         for k in range(k_local):
-            p_str = ''
             p = random.randint(0, 2)
             p_str += pauli_group[p]
             p_str += str(random_index[k])
-            pauli.append(p_str)
+            p_str += ','
+        if custom == 0:
+            para = random.random() * 1
+        else:
+            para = np.random.choice([0.01, 0.2, 0.95], p=[0.79, 0.2, 0.01])
+        H = (para, p_str.strip(','))
 
-        H = Hamiltonian(random.random() * math.pi, pauli)
         Hamiltonian_list.append(H)
-
     return Hamiltonian_list
-
-H_list = random_generate_Hamiltonian(5, 30)
-print(H_list)
-fout = open('test/input.txt', 'w')
-for h in H_list:
-    fout.write(str(h))
-    fout.write('\n')
-
-H_list = random_generate_Hamiltonian(5, 3)
-print(H_list)
-fout = open('test/obv.txt', 'w')
-for h in H_list:
-    fout.write(str(h))
-    fout.write('\n')
