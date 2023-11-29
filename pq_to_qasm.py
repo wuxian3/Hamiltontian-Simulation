@@ -87,6 +87,9 @@ def convert_pq_circuit_to_qasm(paddle_quantum_circ: pq.ansatz.circuit.Circuit) -
     qasm_str = qasm_version + qasm_custom_gate + qasm_bit_info + qasm_gate_sequence
     
     return qasm_str
+
+def convert_qasm_to_pq_circuit(qasm: str) -> pq.ansatz.circuit.Circuit:
+    pass
         
 def _convert_gate_to_qasm_str(gate_name: str, gate_qubits: Union[List[int], int], gate_theta: Union[paddle.Tensor, None]) -> Tuple[str, str]:
     gate_qasm_str = ''
