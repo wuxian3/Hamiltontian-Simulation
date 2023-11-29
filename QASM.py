@@ -6,7 +6,8 @@ from qiskit import QuantumCircuit, transpile, BasicAer
 # from qiskit.providers import BaseBackend
 from qiskit.providers.backend import Backend
 
-from sample import get_a_score
+from Hamiltion_Simulation.sample import get_a_score
+
 
 class QASM_qdrift:
     def __init__(self, qubits: int, H: pq.hamiltonian.Hamiltonian) -> None:
@@ -189,7 +190,8 @@ def get_sample_list(H: pq.hamiltonian.Hamiltonian, t: int=1, extra_gate_number: 
 
 if __name__ == "__main__":
     # Example of the QASM
-    from Hamiltonian import random_generate_Hamiltonian
+    from Hamiltion_Simulation.Hamiltonian import  random_generate_Hamiltonian
+    # random_generate_Hamiltonian
     import warnings
 
     # set basic data
