@@ -96,7 +96,7 @@ class Noise_Model:
             basis_gates: the basis gates
             qubits: the qubits
         """
-        _signle_qubit_quantum_error = ['depolarizing_error', 'reset_error', 'thermal_relaxation_error', 'phase_amplitude_damping_error',
+        _one_qubit_quantum_error = ['depolarizing_error', 'reset_error', 'thermal_relaxation_error', 'phase_amplitude_damping_error',
                                'amplitude_damping_error', 'phase_damping_error']
         
         pass
